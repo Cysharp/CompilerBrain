@@ -35,19 +35,35 @@ public static class CSharpMcpServer
         return CodeDiagnostic.Errors(compilation.GetDiagnostics());
     }
 
-    [McpServerTool, Description("Get filepath and code without method-body to analyze csprojct.")]
-    public static CodeStructure[] GetCodeStructures(SessionMemory memory, Guid sessionId)
+    [McpServerTool, Description("Get filepath and code without method-body to analyze csprojct. Data is paging so need to read mulitiple times. start page is one.")]
+    public static CodeStructure GetCodeStructure(SessionMemory memory, Guid sessionId, int page)
     {
+        const int FilesPerPage = 30;
+
         var session = memory.GetSession(sessionId);
         var compilation = session.GetCompilation();
 
-        return compilation.SyntaxTrees
-            .Select(tree => new CodeStructure
+        var trees = compilation.SyntaxTrees
+            .Where(x => File.Exists(x.FilePath))
+            .ToArray();
+
+        var totalPage = trees.Length / FilesPerPage + 1;
+
+        var codes = trees.Skip((page - 1) * FilesPerPage)
+            .Take(FilesPerPage)
+            .Select(x => new Code
             {
-                FilePath = tree.FilePath,
-                CodeWithoutBody = CodeCompression.RemoveBody(tree)
+                FilePath = x.FilePath,
+                CodeWithoutBody = CodeCompression.RemoveBody(x)
             })
             .ToArray();
+
+        return new CodeStructure
+        {
+            Page = page,
+            TotalPage = totalPage,
+            Codes = codes
+        };
     }
 
     [McpServerTool, Description("Read existing code in current session context, if not found returns null.")]

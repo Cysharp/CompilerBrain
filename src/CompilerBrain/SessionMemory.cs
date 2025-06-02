@@ -78,7 +78,16 @@ public class CodeDiagnostic
 
 public readonly record struct CodeLocation(int Start, int Length);
 
+
+
 public class CodeStructure
+{
+    public required int Page { get; init; }
+    public required int TotalPage { get; init; }
+    public required Code[] Codes { get; init; }
+}
+
+public class Code
 {
     public required string FilePath { get; init; }
     public required string CodeWithoutBody { get; init; }
