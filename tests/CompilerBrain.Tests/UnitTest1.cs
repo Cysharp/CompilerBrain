@@ -21,7 +21,7 @@ public class UnitTest1(ITestContextAccessor testContextAccessor)
 
 
 
-        var diagnostics = await CSharpMcpServer.OpenCsharpProject(memory, id, path);
+        var diagnostics = await CSharpMcpServer.OpenCSharpProject(memory, id, path);
 
 
         var json = JsonSerializer.Serialize(diagnostics);

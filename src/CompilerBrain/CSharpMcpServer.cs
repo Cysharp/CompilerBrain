@@ -1,7 +1,6 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol;
@@ -23,93 +22,69 @@ public static partial class CSharpMcpServer
         return memory.CreateNewSession();
     }
 
-    [McpServerTool, Description("Open csprojct of the session context, returns diagnostics of compile result.")]
-    public static async Task<CodeDiagnostic[]> OpenCsharpProject(SessionMemory memory, Guid sessionId, string projectPath)
+    [McpServerTool, Description("Open solution file (.sln/.slnx) of the session context, returns project name and file-paths.")]
+    public static async Task<ProjectNameAndFilePath[]> OpenCSharpSolution(SessionMemory memory, Guid sessionId, string solutionPath)
     {
         using var workspace = MSBuildWorkspace.Create();
+        var solution = await workspace.OpenSolutionAsync(solutionPath);
 
-        var project = await workspace.OpenProjectAsync(projectPath);
+        var session = memory.GetSession(sessionId);
 
-        var compilation = await project.GetCompilationAsync();
+        var sln = new CSharpSolution(solution);
+        var list = new List<ProjectNameAndFilePath>();
+        foreach (var item in solution.Projects)
+        {
+            if (sln.TryAddProject(item))
+            {
+                list.Add(new ProjectNameAndFilePath(item.Name, item.FilePath!));
+            }
+        }
 
+        session.Solution = sln;
+        return list.ToArray();
+    }
+
+    [McpServerTool, Description("Open csproject of the session context, returns diagnostics of compile result.")]
+    public static async Task<CodeDiagnostic[]> OpenCSharpProject(SessionMemory memory, Guid sessionId, string projectFilePath)
+    {
+        var session = memory.GetSession(sessionId);
+
+        if (!session.HasSolution)
+        {
+            // create project only solution
+            using var workspace = MSBuildWorkspace.Create();
+            var proj = await workspace.OpenProjectAsync(projectFilePath);
+
+            var sln = new CSharpSolution(proj.Solution);
+            if (!sln.TryAddProject(proj))
+            {
+                throw new InvalidOperationException("Can't open compilable project.");
+            }
+
+            session.Solution = sln;
+        }
+
+        if (!session.Solution.TryGetProject(projectFilePath, out var project))
+        {
+            throw new InvalidOperationException("Can't find project in solution.");
+        }
+
+        var compilation = await project.GetNewProjectCompilationAsync();
         if (compilation == null)
         {
             throw new InvalidOperationException("Can't get compilation.");
         }
 
-        var session = memory.GetSession(sessionId);
-        session.Compilation = compilation;
-        session.ParseOptions = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
-
+        project.Compilation = compilation;
         return CodeDiagnostic.Errors(compilation.GetDiagnostics());
     }
 
-    [McpServerTool, Description("Open solution file (.sln) of the session context, returns diagnostics of compile result for all projects.")]
-    public static async Task<SolutionDiagnostic> OpenCsharpSolution(SessionMemory memory, Guid sessionId, string solutionPath)
-    {
-        using var workspace = MSBuildWorkspace.Create();
-
-        var solution = await workspace.OpenSolutionAsync(solutionPath);
-
-        var projectDiagnostics = new List<ProjectDiagnostic>();
-        Compilation? primaryCompilation = null;
-        CSharpParseOptions? parseOptions = null;
-
-        foreach (var project in solution.Projects)
-        {
-            if (project.Language == LanguageNames.CSharp)
-            {
-                var compilation = await project.GetCompilationAsync();
-                if (compilation != null)
-                {
-                    var diagnostics = CodeDiagnostic.Errors(compilation.GetDiagnostics());
-                    projectDiagnostics.Add(new ProjectDiagnostic
-                    {
-                        ProjectName = project.Name,
-                        ProjectPath = project.FilePath ?? "",
-                        Diagnostics = diagnostics
-                    });
-
-                    // Use the first compilation as the primary one for the session
-                    if (primaryCompilation == null)
-                    {
-                        primaryCompilation = compilation;
-                        parseOptions = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
-                    }
-                    else
-                    {
-                        // Merge compilations by adding all syntax trees
-                        primaryCompilation = primaryCompilation.AddSyntaxTrees(compilation.SyntaxTrees);
-                    }
-                }
-            }
-        }
-
-        if (primaryCompilation == null)
-        {
-            throw new InvalidOperationException("No C# projects found in solution or failed to get compilation.");
-        }
-
-        var session = memory.GetSession(sessionId);
-        session.Compilation = primaryCompilation;
-        session.ParseOptions = parseOptions ?? CSharpParseOptions.Default;
-
-        return new SolutionDiagnostic
-        {
-            SolutionPath = solutionPath,
-            ProjectDiagnostics = projectDiagnostics.ToArray(),
-            TotalProjects = solution.Projects.Count(),
-            CSharpProjects = projectDiagnostics.Count
-        };
-    }
-
     [McpServerTool, Description("Get filepath and code without method-body to analyze csprojct. Data is paging so need to read mulitiple times. start page is one.")]
-    public static CodeStructure GetCodeStructure(SessionMemory memory, Guid sessionId, int page)
+    public static CodeStructure GetCodeStructure(SessionMemory memory, Guid sessionId, string projectFilePath, int page)
     {
         const int FilesPerPage = 30;
 
-        var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
+        var compilation = memory.GetCompilation(sessionId, projectFilePath);
 
         var trees = compilation.SyntaxTrees
             .Where(x => File.Exists(x.FilePath))
@@ -135,10 +110,9 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Read existing code in current session context, if not found returns null.")]
-    public static string? ReadCode(SessionMemory memory, Guid sessionId, string filePath, string code)
+    public static string? ReadCode(SessionMemory memory, Guid sessionId, string projectFilePath, string filePath, string code)
     {
-        var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
+        var compilation = memory.GetCompilation(sessionId, projectFilePath);
 
         if (!compilation.SyntaxTrees.TryGet(filePath, out var existingTree) || !existingTree.TryGetText(out var text))
         {
@@ -149,13 +123,14 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Add or replace new code to current session context, returns diagnostics of compile result.")]
-    public static AddOrReplaceResult AddOrReplaceCode(SessionMemory memory, Guid sessionId, Codes[] codes)
+    public static AddOrReplaceResult AddOrReplaceCode(SessionMemory memory, Guid sessionId, string projectFilePath, Codes[] codes)
     {
         try
         {
             var session = memory.GetSession(sessionId);
-            var compilation = session.Compilation;
-            var parseOptions = session.ParseOptions;
+            var project = memory.GetSession(sessionId).Solution.GetProject(projectFilePath);
+            var compilation = project.Compilation;
+            var parseOptions = project.ParseOptions;
 
             if (codes.Length == 0)
             {
@@ -187,19 +162,19 @@ public static partial class CSharpMcpServer
 
                     codeChanges.Add(new CodeChange { FilePath = filePath, LineChanges = lineChanges });
                     newCompilation = compilation.ReplaceSyntaxTree(oldTree, newTree);
-                    session.RemoveNewCode(oldTree);
-                    session.AddNewCode(newTree);
+                    project.RemoveNewCode(oldTree);
+                    project.AddNewCode(newTree);
                 }
                 else
                 {
                     var syntaxTree = CSharpSyntaxTree.ParseText(code, options: parseOptions, path: filePath);
                     codeChanges.Add(new CodeChange { FilePath = filePath, LineChanges = [new LineChanges { RemoveLine = null, AddLine = code }] });
                     newCompilation = compilation.AddSyntaxTrees(syntaxTree);
-                    session.AddNewCode(syntaxTree);
+                    project.AddNewCode(syntaxTree);
                 }
             }
 
-            session.Compilation = newCompilation;
+            project.Compilation = newCompilation;
             var diagnostics = CodeDiagnostic.Errors(newCompilation.GetDiagnostics());
 
             var result = new AddOrReplaceResult
@@ -217,13 +192,14 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Insert code at specified position in an existing file. Supports various insertion modes like at position, at line start/end, before/after line.")]
-    public static InsertCodeResult InsertCode(SessionMemory memory, Guid sessionId, InsertCodeRequest[] insertRequests)
+    public static InsertCodeResult InsertCode(SessionMemory memory, Guid sessionId, string projectFilePath, InsertCodeRequest[] insertRequests)
     {
         try
         {
             var session = memory.GetSession(sessionId);
-            var compilation = session.Compilation;
-            var parseOptions = session.ParseOptions;
+            var project = memory.GetSession(sessionId).Solution.GetProject(projectFilePath);
+            var compilation = project.Compilation;
+            var parseOptions = project.ParseOptions;
 
             if (insertRequests.Length == 0)
             {
@@ -279,11 +255,11 @@ public static partial class CSharpMcpServer
 
                 codeChanges.Add(new CodeChange { FilePath = request.FilePath, LineChanges = lineChanges.ToArray() });
                 newCompilation = newCompilation.ReplaceSyntaxTree(oldTree, newTree);
-                session.RemoveNewCode(oldTree);
-                session.AddNewCode(newTree);
+                project.RemoveNewCode(oldTree);
+                project.AddNewCode(newTree);
             }
 
-            session.Compilation = newCompilation;
+            project.Compilation = newCompilation;
             var diagnostics = CodeDiagnostic.Errors(newCompilation.GetDiagnostics());
 
             return new InsertCodeResult
@@ -298,26 +274,30 @@ public static partial class CSharpMcpServer
         }
     }
 
-    [McpServerTool, Description("Save add-or-replaced codes in current in-memory session context, return value is saved paths.")]
+    [McpServerTool, Description("Save all add/modified codes in current in-memory session context, return value is saved paths.")]
     public static string[] SaveCodeToDisc(SessionMemory memory, Guid sessionId)
     {
         var session = memory.GetSession(sessionId);
-        var newSources = session.ClearNewCodes();
-        var result = new string[newSources.Length];
-        var i = 0;
-        foreach (var item in newSources)
+
+        var result = new List<string>();
+
+        foreach (var proj in session.Solution.Projects)
         {
-            File.WriteAllText(item.FilePath, item.GetText().ToString(), Utf8Encoding);
-            result[i++] = item.FilePath;
+            var newSources = proj.GetNewCodesAndClear();
+            foreach (var item in newSources)
+            {
+                File.WriteAllText(item.FilePath, item.GetText().ToString(), Utf8Encoding);
+                result.Add(item.FilePath);
+            }
         }
-        return result;
+
+        return result.ToArray();
     }
 
     [McpServerTool, Description("Search for code patterns using regular expressions in files matching the target file pattern.")]
-    public static SearchResult SearchCodeByRegex(SessionMemory memory, Guid sessionId, string targetFileRegex, string searchRegex)
+    public static SearchResult SearchCodeByRegex(SessionMemory memory, Guid sessionId, string projectFilePath, string targetFileRegex, string searchRegex)
     {
-        var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
+        var compilation = memory.GetCompilation(sessionId, projectFilePath);
 
         // accept user generated regex patterns so no-compiled and non-backtracking options are used.
         var targetFilePattern = new Regex(targetFileRegex, RegexOptions.IgnoreCase | RegexOptions.NonBacktracking);
@@ -367,6 +347,15 @@ public static partial class CSharpMcpServer
         };
     }
 
+    // TODO: MPC API
+    static void RunUnitTest(SessionMemory memory, Guid sessionId, string projectFilePath)
+    {
+        var compilation = memory.GetCompilation(sessionId, projectFilePath);
+
+        using var libraryStream = new MemoryStream();
+        // var r = session.Compilation.Emit(libraryStream);
+    }
+
     static int CalculateInsertPosition(SourceText sourceText, int position, InsertMode mode)
     {
         return mode switch
@@ -400,14 +389,6 @@ public static partial class CSharpMcpServer
         var lines = sourceText.Lines;
         var adjustedLineNumber = Math.Max(0, Math.Min(lineNumber - 1, lines.Count - 1));
         return lines[adjustedLineNumber].End;
-    }
-
-    static void RunUnitTest(SessionMemory memory, Guid sessionId)
-    {
-        var session = memory.GetSession(sessionId);
-
-        using var libraryStream = new MemoryStream();
-        var r = session.Compilation.Emit(libraryStream);
     }
 
     static CodeContext AnalyzeSyntaxContext(SyntaxNode root, int position)

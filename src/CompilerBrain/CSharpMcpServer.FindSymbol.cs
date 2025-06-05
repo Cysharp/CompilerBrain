@@ -16,10 +16,9 @@ public static partial class CSharpMcpServer
 {
 
     [McpServerTool, Description("Find symbols by name pattern in the current compilation. Use wildcards like 'I*' to find all interfaces starting with 'I'.")]
-    public static FindSymbolResult FindSymbolsByName(SessionMemory memory, Guid sessionId, string namePattern)
+    public static FindSymbolResult FindSymbolsByName(SessionMemory memory, Guid sessionId, string projectFilePath, string namePattern)
     {
-        var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
+        var compilation = memory.GetCompilation(sessionId, projectFilePath);
 
         var regexPattern = "^" + Regex.Escape(namePattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
         var regex = new Regex(regexPattern, RegexOptions.IgnoreCase);
@@ -48,10 +47,11 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Find all references to a symbol by its name and location. Returns references, implementations, and declarations.")]
-    public static async Task<SymbolReferenceResult> FindSymbolReferences(SessionMemory memory, Guid sessionId, string filePath, int position)
+    public static async Task<SymbolReferenceResult> FindSymbolReferences(SessionMemory memory, Guid sessionId, string projectFilePath, string filePath, int position)
     {
         var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
+        var solution = session.Solution;
+        var compilation = solution.GetProject(projectFilePath).Compilation;
 
         if (!compilation.SyntaxTrees.TryGet(filePath, out var syntaxTree))
         {
@@ -70,9 +70,7 @@ public static partial class CSharpMcpServer
             throw new ArgumentException($"No symbol found at position {position} in file {filePath}");
         }
 
-        var solution = CreateTemporarySolution(compilation);
-
-        var references = await SymbolFinder.FindReferencesAsync(symbol, solution);
+        var references = await SymbolFinder.FindReferencesAsync(symbol, solution.RawSolution);
         var allReferences = new List<SymbolReference>();
 
         foreach (var reference in references)
@@ -101,11 +99,11 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Find all types that implement a specific interface. Provide the interface name (e.g., 'IFoo').")]
-    public static async Task<SymbolReferenceResult> FindInterfaceImplementations(SessionMemory memory, Guid sessionId, string interfaceName)
+    public static async Task<SymbolReferenceResult> FindInterfaceImplementations(SessionMemory memory, Guid sessionId, string projectFilePath, string interfaceName)
     {
         var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
-        var solution = CreateTemporarySolution(compilation);
+        var solution = session.Solution;
+        var compilation = solution.GetProject(projectFilePath).Compilation;
 
         var interfaceSymbol = compilation.GetSymbolsWithName(interfaceName, SymbolFilter.Type)
             .OfType<ITypeSymbol>()
@@ -121,7 +119,7 @@ public static partial class CSharpMcpServer
             throw new ArgumentException($"Interface '{interfaceName}' is not a named type symbol.");
         }
 
-        var implementations = await SymbolFinder.FindImplementationsAsync(namedInterfaceSymbol, solution);
+        var implementations = await SymbolFinder.FindImplementationsAsync(namedInterfaceSymbol, solution.RawSolution);
         var allImplementations = new List<SymbolReference>();
 
         foreach (var impl in implementations)
@@ -147,11 +145,11 @@ public static partial class CSharpMcpServer
     }
 
     [McpServerTool, Description("Find all derived classes of a specific base class. Provide the base class name (e.g., 'BaseClass').")]
-    public static async Task<SymbolReferenceResult> FindDerivedClasses(SessionMemory memory, Guid sessionId, string baseClassName)
+    public static async Task<SymbolReferenceResult> FindDerivedClasses(SessionMemory memory, Guid sessionId, string projectFilePath, string baseClassName)
     {
         var session = memory.GetSession(sessionId);
-        var compilation = session.Compilation;
-        var solution = CreateTemporarySolution(compilation);
+        var solution = session.Solution;
+        var compilation = solution.GetProject(projectFilePath).Compilation;
 
         var baseClassSymbol = compilation.GetSymbolsWithName(baseClassName, SymbolFilter.Type)
             .OfType<ITypeSymbol>()
@@ -167,7 +165,7 @@ public static partial class CSharpMcpServer
             throw new ArgumentException($"Base class '{baseClassName}' is not a named type symbol.");
         }
 
-        var derivedClasses = await SymbolFinder.FindDerivedClassesAsync(namedBaseClassSymbol, solution);
+        var derivedClasses = await SymbolFinder.FindDerivedClassesAsync(namedBaseClassSymbol, solution.RawSolution);
         var allDerived = new List<SymbolReference>();
 
         foreach (var derived in derivedClasses)
@@ -190,36 +188,6 @@ public static partial class CSharpMcpServer
             TotalImplementations = allDerived.Count,
             TotalDeclarations = 0
         };
-    }
-
-    static Solution CreateTemporarySolution(Compilation compilation)
-    {
-        var workspace = new AdhocWorkspace();
-        var solution = workspace.CurrentSolution;
-        var projectInfo = ProjectInfo.Create(
-            ProjectId.CreateNewId(),
-            VersionStamp.Create(),
-            "TempProject",
-            "TempProject",
-            LanguageNames.CSharp,
-            compilationOptions: compilation.Options,
-            parseOptions: (compilation as CSharpCompilation)?.SyntaxTrees.FirstOrDefault()?.Options);
-
-        solution = solution.AddProject(projectInfo);
-        var project = solution.GetProject(projectInfo.Id)!;
-
-        foreach (var syntaxTree in compilation.SyntaxTrees)
-        {
-            var documentInfo = DocumentInfo.Create(
-                DocumentId.CreateNewId(project.Id),
-                Path.GetFileName(syntaxTree.FilePath) ?? "Unknown.cs",
-                filePath: syntaxTree.FilePath,
-                loader: TextLoader.From(TextAndVersion.Create(syntaxTree.GetText(), VersionStamp.Create())));
-
-            solution = solution.AddDocument(documentInfo);
-        }
-
-        return solution;
     }
 
     static SymbolReference? CreateSymbolReference(Location location, ISymbol symbol, string referenceKind)

@@ -5,8 +5,16 @@ var memory = new SessionMemory();
 
 var id = CSharpMcpServer.Initialize(memory);
 
+var path = @"C:\Users\S04451\source\repos\ConsoleApp42\ConsoleApp42.sln";
+// path = @"C:\ZLinq\ZLinq.slnx";
+var hugahuga = await CSharpMcpServer.OpenCSharpSolution(memory, id, path);
+
+
 //var diagnostics = await CSharpMcpServer.OpenCsharpProject(memory, id, @"C:\ZLinq\src\ZLinq\ZLinq.csproj");
-var diagnostics = await CSharpMcpServer.OpenCsharpProject(memory, id, @"C:\MyGit\ZLinq\src\ZLinq\ZLinq.csproj");
+var diagnostics = await CSharpMcpServer.OpenCSharpProject(memory, id, @"C:\MyGit\ZLinq\src\ZLinq\ZLinq.csproj");
+
+// C:\ZLinq\ZLinq.slnx
+
 
 
 var list = new List<CodeStructure>();
