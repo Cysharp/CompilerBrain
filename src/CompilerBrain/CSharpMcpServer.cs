@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -42,6 +42,65 @@ public static partial class CSharpMcpServer
         session.ParseOptions = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
 
         return CodeDiagnostic.Errors(compilation.GetDiagnostics());
+    }
+
+    [McpServerTool, Description("Open solution file (.sln) of the session context, returns diagnostics of compile result for all projects.")]
+    public static async Task<SolutionDiagnostic> OpenCsharpSolution(SessionMemory memory, Guid sessionId, string solutionPath)
+    {
+        using var workspace = MSBuildWorkspace.Create();
+
+        var solution = await workspace.OpenSolutionAsync(solutionPath);
+
+        var projectDiagnostics = new List<ProjectDiagnostic>();
+        Compilation? primaryCompilation = null;
+        CSharpParseOptions? parseOptions = null;
+
+        foreach (var project in solution.Projects)
+        {
+            if (project.Language == LanguageNames.CSharp)
+            {
+                var compilation = await project.GetCompilationAsync();
+                if (compilation != null)
+                {
+                    var diagnostics = CodeDiagnostic.Errors(compilation.GetDiagnostics());
+                    projectDiagnostics.Add(new ProjectDiagnostic
+                    {
+                        ProjectName = project.Name,
+                        ProjectPath = project.FilePath ?? "",
+                        Diagnostics = diagnostics
+                    });
+
+                    // Use the first compilation as the primary one for the session
+                    if (primaryCompilation == null)
+                    {
+                        primaryCompilation = compilation;
+                        parseOptions = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
+                    }
+                    else
+                    {
+                        // Merge compilations by adding all syntax trees
+                        primaryCompilation = primaryCompilation.AddSyntaxTrees(compilation.SyntaxTrees);
+                    }
+                }
+            }
+        }
+
+        if (primaryCompilation == null)
+        {
+            throw new InvalidOperationException("No C# projects found in solution or failed to get compilation.");
+        }
+
+        var session = memory.GetSession(sessionId);
+        session.Compilation = primaryCompilation;
+        session.ParseOptions = parseOptions ?? CSharpParseOptions.Default;
+
+        return new SolutionDiagnostic
+        {
+            SolutionPath = solutionPath,
+            ProjectDiagnostics = projectDiagnostics.ToArray(),
+            TotalProjects = solution.Projects.Count(),
+            CSharpProjects = projectDiagnostics.Count
+        };
     }
 
     [McpServerTool, Description("Get filepath and code without method-body to analyze csprojct. Data is paging so need to read mulitiple times. start page is one.")]
@@ -157,6 +216,88 @@ public static partial class CSharpMcpServer
         }
     }
 
+    [McpServerTool, Description("Insert code at specified position in an existing file. Supports various insertion modes like at position, at line start/end, before/after line.")]
+    public static InsertCodeResult InsertCode(SessionMemory memory, Guid sessionId, InsertCodeRequest[] insertRequests)
+    {
+        try
+        {
+            var session = memory.GetSession(sessionId);
+            var compilation = session.Compilation;
+            var parseOptions = session.ParseOptions;
+
+            if (insertRequests.Length == 0)
+            {
+                return new InsertCodeResult { CodeChanges = [], Diagnostics = [] };
+            }
+
+            Compilation newCompilation = compilation;
+            List<CodeChange> codeChanges = new();
+            foreach (var request in insertRequests)
+            {
+                if (!newCompilation.SyntaxTrees.TryGet(request.FilePath, out var oldTree))
+                {
+                    throw new InvalidOperationException($"File not found in compilation: {request.FilePath}");
+                }
+
+                if (!oldTree.TryGetText(out var sourceText))
+                {
+                    throw new InvalidOperationException($"Cannot get text from file: {request.FilePath}");
+                }
+
+                var insertPosition = CalculateInsertPosition(sourceText, request.Position, request.Mode);
+                var lineBreak = oldTree.GetLineBreakFromFirstLine();
+                var codeToInsert = request.CodeToInsert.ReplaceLineEndings(lineBreak);
+
+                // Add line breaks if needed based on insert mode
+                if (request.Mode == InsertMode.AfterLine || request.Mode == InsertMode.BeforeLine)
+                {
+                    if (!codeToInsert.EndsWith(lineBreak))
+                    {
+                        codeToInsert += lineBreak;
+                    }
+                }
+
+                var newText = sourceText.WithChanges(new TextChange(new TextSpan(insertPosition, 0), codeToInsert));
+                var newTree = oldTree.WithChangedText(newText);
+
+                // Calculate changes for reporting
+                var changes = newTree.GetChanges(oldTree);
+                var lineChanges = new List<LineChanges>();
+
+                foreach (var change in changes)
+                {
+                    if (change.Span.Length == 0) // Insert operation
+                    {
+                        lineChanges.Add(new LineChanges { RemoveLine = null, AddLine = change.NewText });
+                    }
+                    else // Replace operation (shouldn't happen in pure insert, but safety)
+                    {
+                        var changeText = GetLineText(oldTree, change.Span);
+                        lineChanges.Add(new LineChanges { RemoveLine = changeText.ToString(), AddLine = change.NewText });
+                    }
+                }
+
+                codeChanges.Add(new CodeChange { FilePath = request.FilePath, LineChanges = lineChanges.ToArray() });
+                newCompilation = newCompilation.ReplaceSyntaxTree(oldTree, newTree);
+                session.RemoveNewCode(oldTree);
+                session.AddNewCode(newTree);
+            }
+
+            session.Compilation = newCompilation;
+            var diagnostics = CodeDiagnostic.Errors(newCompilation.GetDiagnostics());
+
+            return new InsertCodeResult
+            {
+                CodeChanges = codeChanges.ToArray(),
+                Diagnostics = diagnostics
+            };
+        }
+        catch (Exception ex)
+        {
+            throw new McpException(ex.Message, ex);
+        }
+    }
+
     [McpServerTool, Description("Save add-or-replaced codes in current in-memory session context, return value is saved paths.")]
     public static string[] SaveCodeToDisc(SessionMemory memory, Guid sessionId)
     {
@@ -226,6 +367,40 @@ public static partial class CSharpMcpServer
         };
     }
 
+    static int CalculateInsertPosition(SourceText sourceText, int position, InsertMode mode)
+    {
+        return mode switch
+        {
+            InsertMode.AtPosition => Math.Max(0, Math.Min(position, sourceText.Length)),
+            InsertMode.AtLineStart => CalculateLinePosition(sourceText, position, atStart: true),
+            InsertMode.AtLineEnd => CalculateLinePosition(sourceText, position, atStart: false),
+            InsertMode.BeforeLine => CalculateBeforeLinePosition(sourceText, position),
+            InsertMode.AfterLine => CalculateAfterLinePosition(sourceText, position),
+            _ => position
+        };
+    }
+
+    static int CalculateLinePosition(SourceText sourceText, int lineNumber, bool atStart)
+    {
+        var lines = sourceText.Lines;
+        var adjustedLineNumber = Math.Max(0, Math.Min(lineNumber - 1, lines.Count - 1));
+        var line = lines[adjustedLineNumber];
+        return atStart ? line.Start : line.End;
+    }
+
+    static int CalculateBeforeLinePosition(SourceText sourceText, int lineNumber)
+    {
+        var lines = sourceText.Lines;
+        var adjustedLineNumber = Math.Max(0, Math.Min(lineNumber - 1, lines.Count - 1));
+        return lines[adjustedLineNumber].Start;
+    }
+
+    static int CalculateAfterLinePosition(SourceText sourceText, int lineNumber)
+    {
+        var lines = sourceText.Lines;
+        var adjustedLineNumber = Math.Max(0, Math.Min(lineNumber - 1, lines.Count - 1));
+        return lines[adjustedLineNumber].End;
+    }
 
     static void RunUnitTest(SessionMemory memory, Guid sessionId)
     {

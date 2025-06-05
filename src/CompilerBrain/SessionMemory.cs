@@ -136,6 +136,35 @@ public readonly record struct Codes
     public required string Code { get; init; }
 }
 
+// Insert code structures
+public readonly record struct InsertCodeRequest
+{
+    public required string FilePath { get; init; }
+    public required string CodeToInsert { get; init; }
+    public required int Position { get; init; }
+    public required InsertMode Mode { get; init; }
+}
+
+public enum InsertMode
+{
+    /// <summary>Insert at exact character position</summary>
+    AtPosition,
+    /// <summary>Insert at the beginning of the specified line (1-based)</summary>
+    AtLineStart,
+    /// <summary>Insert at the end of the specified line (1-based)</summary>
+    AtLineEnd,
+    /// <summary>Insert after the specified line (1-based)</summary>
+    AfterLine,
+    /// <summary>Insert before the specified line (1-based)</summary>
+    BeforeLine
+}
+
+public readonly record struct InsertCodeResult
+{
+    public required CodeChange[] CodeChanges { get; init; }
+    public required CodeDiagnostic[] Diagnostics { get; init; }
+}
+
 public readonly record struct AddOrReplaceResult
 {
     public required CodeChange[] CodeChanges { get; init; }
@@ -240,4 +269,20 @@ public readonly record struct FindSymbolResult
 {
     public required SymbolInfo[] Symbols { get; init; }
     public required int TotalCount { get; init; }
+}
+
+// Solution diagnostic structures
+public readonly record struct SolutionDiagnostic
+{
+    public required string SolutionPath { get; init; }
+    public required ProjectDiagnostic[] ProjectDiagnostics { get; init; }
+    public required int TotalProjects { get; init; }
+    public required int CSharpProjects { get; init; }
+}
+
+public readonly record struct ProjectDiagnostic
+{
+    public required string ProjectName { get; init; }
+    public required string ProjectPath { get; init; }
+    public required CodeDiagnostic[] Diagnostics { get; init; }
 }
