@@ -46,18 +46,32 @@ app.ConfigureLogging(x =>
     x.AddZLoggerConsole();
 });
 
+app.PostConfigureServices(services =>
+{
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    ConsoleApp.Log = x => logger.ZLogInformation($"{x}");
+    ConsoleApp.LogError = x => logger.ZLogError($"{x}");
+});
+
 app.Add<Commands>();
 
 // call initialize
-await app.RunAsync(args, disposeServiceProvider: false);
-
-// If ConsoleAppFramework throws error/canceled, ExitCode will be set to non-zero.
-while (Environment.ExitCode == 0)
+try
 {
-    var command = Console.ReadLine();
-    if (command == null) break;
+    await app.RunAsync(args, disposeServiceProvider: false);
 
-    await app.RunAsync([command], disposeServiceProvider: false);
+    // If ConsoleAppFramework throws error/canceled, ExitCode will be set to non-zero.
+
+    while (Environment.ExitCode == 0)
+    {
+        var command = Console.ReadLine();
+        if (command == null) break;
+
+        await app.RunAsync([command], disposeServiceProvider: false);
+    }
+}
+finally
+{
+    await app.RunAsync([], disposeServiceProvider: true); // Dispose at the end
 }
 
-await app.RunAsync([], disposeServiceProvider: true); // Dispose at the end
