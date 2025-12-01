@@ -21,6 +21,7 @@ app.ConfigureServices((configuration, services) =>
     // memory is mutable, process-wide scope.
     services.AddSingleton<SessionMemory>();
     services.AddTransient<SolutionLoadProgress>();
+    services.AddSingleton<CompilerBrainAIFunctions>();
 
     // make chat-client
     var key = configuration.GetSection("ANTHROPIC_API_KEY").Value ?? null;

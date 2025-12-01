@@ -10,6 +10,12 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
 {
     bool initialized = false;
 
+    Solution solution = default!;
+    (string Name, Compilation Compilation)[] compilations = default!;
+
+    public Solution Solution => solution;
+    public ReadOnlyMemory<(string Name, Compilation Compilation)> Compilations => compilations;
+
     public async ValueTask<bool> TryInitializeAsync(string? filePath, CancellationToken cancellationToken)
     {
         if (initialized) return false;
@@ -33,23 +39,20 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
 
         logger.ZLogInformation($"Opening Solution: {filePath}");
 
-        await OpenCSharpSolutionAsync(filePath, cancellationToken);
+        (this.solution, this.compilations) = await OpenCSharpSolutionAsync(filePath, cancellationToken);
+        this.initialized = true;
 
         logger.ZLogInformation($"Initialize Complete");
-
-
-        // workingDirectory = directory;
-        initialized = true;
         return true;
     }
 
-    async Task OpenCSharpSolutionAsync(string solutionPath, CancellationToken cancellationToken)
+    async Task<(Solution, (string, Compilation)[])> OpenCSharpSolutionAsync(string solutionPath, CancellationToken cancellationToken)
     {
         using var workspace = MSBuildWorkspace.Create();
 
         var solution = await workspace.OpenSolutionAsync(solutionPath, progress, cancellationToken: cancellationToken);
 
-        var compilations = new List<Compilation>();
+        var compilations = new List<(string, Compilation)>();
         foreach (var item in solution.Projects)
         {
             logger.ZLogInformation($"Opening Project Copmilation: {item.Name}");
@@ -57,9 +60,12 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
             var compilation = await item.GetCompilationAsync(cancellationToken);
             if (compilation != null)
             {
-                compilations.Add(compilation);
+
+                compilations.Add((item.Name, compilation));
             }
         }
+
+        return (solution, compilations.ToArray());
     }
 }
 
