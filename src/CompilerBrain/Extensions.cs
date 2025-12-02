@@ -1,18 +1,27 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using Anthropic.Models.Beta.Messages;
+using Microsoft.CodeAnalysis;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 
 namespace CompilerBrain;
 
 internal static class Extensions
 {
-    internal static bool TryGet(this IEnumerable<SyntaxTree> syntaxTrees, string filePath, [MaybeNullWhen(false)] out SyntaxTree syntaxTree)
+    // by name or file-path
+    internal static bool TryGetByName(this IEnumerable<SyntaxTree> syntaxTrees, string name, [MaybeNullWhen(false)] out SyntaxTree syntaxTree)
     {
-        if (syntaxTrees is ImmutableArray<SyntaxTree> immutableArray)
+        if (syntaxTrees is ImmutableArray<SyntaxTree> immutableArray) // faster-path
         {
-            foreach (var tree in immutableArray) // faster iteration
+            var array = ImmutableCollectionsMarshal.AsArray(immutableArray)!;
+            foreach (var tree in array)
             {
-                if (tree.FilePath == filePath)
+                var filePath = tree.FilePath.AsSpan(); // don't allocate new string in Path methods
+
+                // match full-path or with extension or without extension
+                if (filePath.Equals(name, StringComparison.OrdinalIgnoreCase)
+                  || Path.GetFileName(filePath).Equals(name, StringComparison.OrdinalIgnoreCase)
+                  || Path.GetFileNameWithoutExtension(filePath).Equals(name, StringComparison.OrdinalIgnoreCase))
                 {
                     syntaxTree = tree;
                     return true;
@@ -23,7 +32,11 @@ internal static class Extensions
         {
             foreach (var tree in syntaxTrees)
             {
-                if (tree.FilePath == filePath)
+                var filePath = tree.FilePath.AsSpan();
+
+                if (filePath.Equals(name, StringComparison.OrdinalIgnoreCase)
+                  || Path.GetFileName(filePath).Equals(name, StringComparison.OrdinalIgnoreCase)
+                  || Path.GetFileNameWithoutExtension(filePath).Equals(name, StringComparison.OrdinalIgnoreCase))
                 {
                     syntaxTree = tree;
                     return true;

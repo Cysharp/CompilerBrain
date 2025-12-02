@@ -24,9 +24,14 @@ public class Commands(SessionMemory memory, CompilerBrainChatService chatService
 
         var response = await chatService.RunAsync(command, cancellationToken);
         logger.ZLogInformation($"{response.AsChatResponse().Text}");
+
+        while (response.ContinuationToken != null)
+        {
+            logger.ZLogInformation($"Continue:");
+            response = await chatService.ContinueAsync(response.ContinuationToken, cancellationToken);
+            logger.ZLogInformation($"{response.AsChatResponse().Text}");
+        }
+
+        logger.ZLogTrace($"Response Done.");
     }
-
-    // public readonly record struct ProjectNameAndFilePath(string ProjectName, string ProjectFilePath);
-
-
 }

@@ -3,6 +3,7 @@
     "CompilerBrain": {
       "commandName": "Project",
       "workingDirectory": "../../" // {SolutionDir}
+      //"workingDirectory": "C:\\ZLinq"
     }
   }
 }

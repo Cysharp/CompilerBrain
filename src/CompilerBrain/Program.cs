@@ -61,7 +61,6 @@ try
     await app.RunAsync(args, disposeServiceProvider: false);
 
     // If ConsoleAppFramework throws error/canceled, ExitCode will be set to non-zero.
-
     while (Environment.ExitCode == 0)
     {
         var command = Console.ReadLine();
@@ -72,6 +71,5 @@ try
 }
 finally
 {
-    await app.RunAsync([], disposeServiceProvider: true); // Dispose at the end
+    (ConsoleApp.ServiceProvider as IDisposable)?.Dispose();
 }
-

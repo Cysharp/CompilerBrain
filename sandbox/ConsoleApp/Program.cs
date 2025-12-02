@@ -1,1 +1,5 @@
-﻿Console.WriteLine("foo");
+﻿
+
+using System.Text;
+
+Console.WriteLine("foo");

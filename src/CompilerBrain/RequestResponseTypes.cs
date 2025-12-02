@@ -3,17 +3,55 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using ZLinq;
 
 namespace CompilerBrain;
 
-// sln/proj
-
 public readonly record struct ProjectNameAndFilePath(string ProjectName, string ProjectFilePath);
 
+public readonly record struct MachineRuntimeInformation(
+    string OperatingSystemPlatform,
+    string OperatingSystemDescription,
+    string OperatingSystemArchitecture,
+    string ProcessArchitecture,
+    string FrameworkDescription,
+    string RuntimeIdentifier
+)
+{
+    public static MachineRuntimeInformation FromCurrent()
+    {
+        return new MachineRuntimeInformation(
+            GetOSPlatform(),
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier
+        );
+    }
+
+    static string GetOSPlatform()
+    {
+        if (OperatingSystem.IsWindows()) return "Windows";
+        if (OperatingSystem.IsLinux()) return "Linux";
+        if (OperatingSystem.IsMacOS()) return "MacOS";
+        return "Unknown";
+    }
+}
+
+public  record struct RootFile
+{
+    public string? ReadMe { get; set; }
+    public string? DirectoryBuildProps { get; set; }
+    public string? EditorConfig { get; set; }
+}
+
 public readonly record struct CodeLocation(int Start, int Length);
+
+public readonly record struct ReadManyCodesResult(string FilePath, string Code);
 
 public readonly record struct CodeStructure
 {
@@ -30,7 +68,7 @@ public readonly record struct AnalyzedCode
 
 public readonly record struct Codes
 {
-    public required string FilePath { get; init; }
+    public required string FileFullPath { get; init; }
     public required string Code { get; init; }
 }
 

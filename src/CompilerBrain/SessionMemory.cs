@@ -2,6 +2,8 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.Extensions.Logging;
+using System;
+using ZLinq;
 using ZLogger;
 
 namespace CompilerBrain;
@@ -11,10 +13,12 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
     bool initialized = false;
 
     Solution solution = default!;
-    (string Name, Compilation Compilation)[] compilations = default!;
+    (Project Project, Compilation Compilation)[] projects = default!;
+
+    (string ProjectName, Compilation Compilation, string[] ChangedFilePaths) lastChanged = default!;
 
     public Solution Solution => solution;
-    public ReadOnlyMemory<(string Name, Compilation Compilation)> Compilations => compilations;
+    public ReadOnlyMemory<(Project Project, Compilation Compilation)> Projects => projects;
 
     public async ValueTask<bool> TryInitializeAsync(string? filePath, CancellationToken cancellationToken)
     {
@@ -39,20 +43,31 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
 
         logger.ZLogInformation($"Opening Solution: {filePath}");
 
-        (this.solution, this.compilations) = await OpenCSharpSolutionAsync(filePath, cancellationToken);
+        (this.solution, this.projects) = await OpenCSharpSolutionAsync(filePath, cancellationToken);
         this.initialized = true;
 
         logger.ZLogInformation($"Initialize Complete");
         return true;
     }
 
-    async Task<(Solution, (string, Compilation)[])> OpenCSharpSolutionAsync(string solutionPath, CancellationToken cancellationToken)
+    public (Project Project, Compilation Compilation) GetProjectAndCompilation(string projectName)
+    {
+        var project = Projects.FirstOrDefault(x => x.Project.Name == projectName);
+        if (project.Project == null) throw new ArgumentException($"Project '{projectName}' not found in session context.");
+        return project;
+    }
+
+    public Project GetProject(string projectName) => GetProjectAndCompilation(projectName).Project;
+
+    public Compilation GetCompilation(string projectName) => GetProjectAndCompilation(projectName).Compilation;
+
+    async Task<(Solution, (Project, Compilation)[])> OpenCSharpSolutionAsync(string solutionPath, CancellationToken cancellationToken)
     {
         using var workspace = MSBuildWorkspace.Create();
 
         var solution = await workspace.OpenSolutionAsync(solutionPath, progress, cancellationToken: cancellationToken);
 
-        var compilations = new List<(string, Compilation)>();
+        var compilations = new List<(Project, Compilation)>();
         foreach (var item in solution.Projects)
         {
             logger.ZLogInformation($"Opening Project Copmilation: {item.Name}");
@@ -60,12 +75,28 @@ public class SessionMemory(ILogger<SessionMemory> logger, SolutionLoadProgress p
             var compilation = await item.GetCompilationAsync(cancellationToken);
             if (compilation != null)
             {
-
-                compilations.Add((item.Name, compilation));
+                compilations.Add((item, compilation));
             }
         }
 
         return (solution, compilations.ToArray());
+    }
+
+    public void SetChangedCodes(string projectName, Compilation compilation, string[] filePaths)
+    {
+        lastChanged = (projectName, compilation, filePaths);
+    }
+
+    public (Compilation Compilation, string[] ChangedFilePaths)? FlushChangedCodes()
+    {
+        var project = projects.Index().FirstOrDefault(x => x.Item.Project.Name == lastChanged.ProjectName);
+        if (project.Item.Project == null) return null;
+
+        projects[project.Index] = (project.Item.Project, lastChanged.Compilation);
+
+        var result = (lastChanged.Compilation, lastChanged.ChangedFilePaths);
+        lastChanged = default;
+        return result;
     }
 }
 
