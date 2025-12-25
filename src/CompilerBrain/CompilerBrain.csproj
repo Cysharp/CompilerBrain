@@ -14,11 +14,12 @@
   <ItemGroup>
 
     <!-- Cysharp Libraries -->
-    <PackageReference Include="ConsoleAppFramework" Version="5.7.12">
+    <PackageReference Include="ConsoleAppFramework" Version="5.7.13">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="ProcessX" Version="1.5.6" />
+    <PackageReference Include="ToonEncoder" Version="1.0.1" />
     <PackageReference Include="ZLinq" Version="1.5.4" />
     <PackageReference Include="ZLinq.DropInGenerator" Version="1.5.4">
       <PrivateAssets>all</PrivateAssets>
@@ -27,10 +28,10 @@
     <PackageReference Include="ZLogger" Version="2.5.10" />
 
     <!-- AI Libraries -->
-    <PackageReference Include="Anthropic" Version="10.4.0" />
+    <PackageReference Include="Anthropic" Version="12.0.1" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-preview.251125.1" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.0.0-preview.251125.1" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.1.1" />
 
     <!-- Roslyn Libraries -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
@@ -44,9 +45,11 @@
 
     <PackageReference Include="ModelContextProtocol" Version="0.3.0-preview.1" />-->
 
+    <!--<PackageReference Include="Basic.Reference.Assemblies" Version="1.8.4" />
+    <PackageReference Include="Basic.Reference.Assemblies.Net100" Version="1.8.4" />-->
 
     <!-- Others -->
-    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.1" />
 
 
   </ItemGroup>

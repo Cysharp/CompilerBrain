@@ -5,6 +5,9 @@ using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ZLinq;
 
@@ -14,15 +17,33 @@ public class CompilerBrainAIFunctions(SessionMemory memory)
 {
     public IEnumerable<AIFunction> GetAIFunctions()
     {
-        yield return AIFunctionFactory.Create(GetProjects);
-        yield return AIFunctionFactory.Create(GetDiagnostics);
-        yield return AIFunctionFactory.Create(ReadImportantInformationFiles);
-        yield return AIFunctionFactory.Create(ReadCode);
-        yield return AIFunctionFactory.Create(ReadManyCodes);
-        yield return AIFunctionFactory.Create(AddOrReplaceCode);
-        yield return AIFunctionFactory.Create(SaveChangedCodeToDisc);
-        yield return AIFunctionFactory.Create(SearchFiles);
-        yield return AIFunctionFactory.Create(SearchCodeByRegex);
+        var jsonSerializerOptions = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = false,
+            DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+            Converters =
+            {
+                // setup generated converter
+                new Cysharp.AI.Converters.CompilerBrain_CodeDiagnosticTabularArrayConverter(),
+            }
+        };
+        jsonSerializerOptions.MakeReadOnly(true); // need MakeReadOnly(true) or setup converter to TypeInfoResolver
+
+        var factoryOptions = new AIFunctionFactoryOptions
+        {
+            SerializerOptions = jsonSerializerOptions
+        };
+
+        yield return AIFunctionFactory.Create(GetProjects, factoryOptions);
+        yield return AIFunctionFactory.Create(GetDiagnostics, factoryOptions);
+        yield return AIFunctionFactory.Create(ReadImportantInformationFiles, factoryOptions);
+        yield return AIFunctionFactory.Create(ReadCode, factoryOptions);
+        yield return AIFunctionFactory.Create(ReadManyCodes, factoryOptions);
+        yield return AIFunctionFactory.Create(AddOrReplaceCode, factoryOptions);
+        yield return AIFunctionFactory.Create(SaveChangedCodeToDisc, factoryOptions);
+        yield return AIFunctionFactory.Create(SearchFiles, factoryOptions);
+        yield return AIFunctionFactory.Create(SearchCodeByRegex, factoryOptions);
     }
 
     [Description("Get project names of loaded solution.")]

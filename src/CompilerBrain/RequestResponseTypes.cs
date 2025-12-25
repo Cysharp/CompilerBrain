@@ -1,4 +1,5 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using Cysharp.AI;
+using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -42,7 +43,7 @@ public readonly record struct MachineRuntimeInformation(
     }
 }
 
-public  record struct RootFile
+public record struct RootFile
 {
     public string? ReadMe { get; set; }
     public string? DirectoryBuildProps { get; set; }
@@ -223,19 +224,22 @@ public readonly record struct ProjectDiagnostic
     public required CodeDiagnostic[] Diagnostics { get; init; }
 }
 
+[GenerateToonTabularArrayConverter]
 public class CodeDiagnostic
 {
     public string Code { get; }
     public string Description { get; }
     public string FilePath { get; }
-    public CodeLocation Location { get; }
+    public int LocationStart { get; }
+    public int LocationLength { get; }
 
     public CodeDiagnostic(Diagnostic diagnostic)
     {
         Code = diagnostic.Id;
         Description = diagnostic.ToString();
         FilePath = diagnostic.Location.SourceTree?.FilePath ?? "";
-        Location = new(diagnostic.Location.SourceSpan.Start, diagnostic.Location.SourceSpan.Length);
+        LocationStart = diagnostic.Location.SourceSpan.Start;
+        LocationLength = diagnostic.Location.SourceSpan.Length;
     }
 
     public static CodeDiagnostic[] Errors(ImmutableArray<Diagnostic> diagnostics)
