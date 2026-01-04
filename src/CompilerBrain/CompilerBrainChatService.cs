@@ -42,6 +42,7 @@ public class CompilerBrainChatService
     string CreateInstructions(SessionMemory memory)
     {
         var runtimeInfo = MachineRuntimeInformation.FromCurrent();
+        var contextFiles = ContextFileLoader.Load(memory.Solution?.FilePath);
 
         var inst =
 $$"""
@@ -69,6 +70,11 @@ The user's environment is as follows:
 - **Be concise** The target audience is C# professionals; verbose explanations are unnecessary, though prioritize clarity when requested by the user or deemed important
 - **Avoid unnecessary output** No pleasantries or greetings
 """;
+
+        foreach (var (fileName, content) in contextFiles.Files)
+        {
+            inst += $"\n\n# {fileName}\n\n{content}";
+        }
 
         return inst;
     }

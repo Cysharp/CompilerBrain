@@ -50,6 +50,8 @@ public record struct RootFile
     public string? EditorConfig { get; set; }
 }
 
+public record struct ContextFiles(Dictionary<string, string> Files);
+
 public readonly record struct CodeLocation(int Start, int Length);
 
 public readonly record struct ReadManyCodesResult(string FilePath, string Code);
