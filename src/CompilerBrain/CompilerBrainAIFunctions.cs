@@ -38,6 +38,7 @@ public class CompilerBrainAIFunctions(SessionMemory memory)
         yield return AIFunctionFactory.Create(GetProjects, factoryOptions);
         yield return AIFunctionFactory.Create(GetDiagnostics, factoryOptions);
         yield return AIFunctionFactory.Create(ReadImportantInformationFiles, factoryOptions);
+        yield return AIFunctionFactory.Create(ReadContextFiles, factoryOptions);
         yield return AIFunctionFactory.Create(ReadCode, factoryOptions);
         yield return AIFunctionFactory.Create(ReadManyCodes, factoryOptions);
         yield return AIFunctionFactory.Create(AddOrReplaceCode, factoryOptions);
@@ -80,6 +81,12 @@ public class CompilerBrainAIFunctions(SessionMemory memory)
             }
         }
         return rootFile;
+    }
+
+    [Description("Read context files (AGENTS.md, CLAUDE.md) from working directory or solution root.")]
+    public ContextFiles ReadContextFiles()
+    {
+        return ContextFileLoader.Load(memory.Solution?.FilePath);
     }
 
     [Description("Read existing code in current session context, if not found returns null.")]
